@@ -32,6 +32,10 @@ const reporter = {
  * In production, this is implemented using a try-catch. The reason we don't
  * use a try-catch directly is so that we can swap out a different
  * implementation in DEV mode.
+ * 
+ * 调用一个函数，同时捕获函数抛出的错误，如果有错误发生则将错误作为返回值返回，否则返回值为null
+ * 
+ * 在生产环境下，这部分逻辑使用了try-catch实现，在dev环境，由于我们不能直接使用try-catch，因此需要采取其他的方式
  *
  * @param {String} name of the guard to use for logging or debugging
  * @param {Function} func The function to invoke
@@ -49,8 +53,17 @@ export function invokeGuardedCallback<A, B, C, D, E, F, Context>(
   e: E,
   f: F,
 ): void {
+  /**
+   * 默认没有错误发生
+   */
   hasError = false;
+  /**
+   * 捕获的错误
+   */
   caughtError = null;
+  /**
+   * 代理执行函数
+   */
   invokeGuardedCallbackImpl.apply(reporter, arguments);
 }
 
@@ -110,6 +123,9 @@ export function hasCaughtError() {
   return hasError;
 }
 
+/**
+ * 清除捕获的effect执行过程中抛出的错误
+ */
 export function clearCaughtError() {
   if (hasError) {
     const error = caughtError;
@@ -117,6 +133,9 @@ export function clearCaughtError() {
     caughtError = null;
     return error;
   } else {
+    /**
+     * 如果没有错误发生则提示一下（不得不说这代码写的很健壮，考虑的很全面，指的学习）
+     */
     invariant(
       false,
       'clearCaughtError was called but no error was captured. This error ' +

@@ -647,51 +647,72 @@ function mountReducer<S, I, A>(
   return [hook.memoizedState, dispatch];
 }
 
+// 更新reducer
 function updateReducer<S, I, A>(
   reducer: (S, A) => S,
   initialArg: I,
   init?: I => S,
 ): [S, Dispatch<A>] {
+  // 首先获取function hook
   const hook = updateWorkInProgressHook();
+  // 队列
   const queue = hook.queue;
   invariant(
     queue !== null,
     'Should have a queue. This is likely a bug in React. Please file an issue.',
   );
 
+  // 保存最后一次的reducer ，也就是当前通过参数传递进来的reducer
   queue.lastRenderedReducer = reducer;
 
+  // 如果不是第一次渲染
   if (numberOfReRenders > 0) {
     // This is a re-render. Apply the new render phase updates to the previous
     // work-in-progress hook.
+    // 获取dispatcher
     const dispatch: Dispatch<A> = (queue.dispatch: any);
+    // 处于渲染阶段的集合不为空
     if (renderPhaseUpdates !== null) {
       // Render phase updates are stored in a map of queue -> linked list
+      // 获取第一阶段更新， 这里返回的类型是一个有序链表
       const firstRenderPhaseUpdate = renderPhaseUpdates.get(queue);
+      // 第一阶段更新不为空
       if (firstRenderPhaseUpdate !== undefined) {
+        // 从更新集合中移除
         renderPhaseUpdates.delete(queue);
+        // 内存态数据
         let newState = hook.memoizedState;
         let update = firstRenderPhaseUpdate;
+        // 循环遍历update队列
         do {
           // Process this render phase update. We don't have to check the
           // priority because it will always be the same as the current
           // render's.
+          // 处理渲染阶段的更新，不需要关心更新优先级，因为在当前渲染阶段，更新队列是不改变的，内部更新是有序的
+          // 获取action
           const action = update.action;
+          // 执行reducer操作
           newState = reducer(newState, action);
+          // 获取下一个阶段的update
           update = update.next;
         } while (update !== null);
 
         // Mark that the fiber performed work, but only if the new state is
         // different from the current state.
+        // 更新完成后，比较数据是否有变化
         if (!is(newState, hook.memoizedState)) {
+          // 标记wip fiber已经收到了更新
           markWorkInProgressReceivedUpdate();
         }
 
+        // 保存最新的变更数据
         hook.memoizedState = newState;
         // Don't persist the state accumlated from the render phase updates to
         // the base state unless the queue is empty.
         // TODO: Not sure if this is the desired semantics, but it's what we
         // do for gDSFP. I can't remember why.
+        // 渲染阶段，队列更新没有处理完毕之前，不需要回刷数据
+        // facebook工程师也是人
         if (hook.baseUpdate === queue.last) {
           hook.baseState = newState;
         }
@@ -701,10 +722,12 @@ function updateReducer<S, I, A>(
         return [newState, dispatch];
       }
     }
+    // 更新队列无内容，直接返回
     return [hook.memoizedState, dispatch];
   }
 
   // The last update in the entire queue
+  // 更新队列尾部
   const last = queue.last;
   // The last update that is part of the base state.
   const baseUpdate = hook.baseUpdate;
@@ -717,6 +740,7 @@ function updateReducer<S, I, A>(
       // For the first update, the queue is a circular linked list where
       // `queue.last.next = queue.first`. Once the first update commits, and
       // the `baseUpdate` is no longer empty, we can unravel the list.
+      // 避免队列出现首尾循环
       last.next = null;
     }
     first = baseUpdate.next;
@@ -803,12 +827,14 @@ function mountState<S>(
     initialState = initialState();
   }
   hook.memoizedState = hook.baseState = initialState;
+  // 初始化队列
   const queue = (hook.queue = {
     last: null,
     dispatch: null,
     lastRenderedReducer: basicStateReducer,
     lastRenderedState: (initialState: any),
   });
+  // 队列绑定dispatch
   const dispatch: Dispatch<
     BasicStateAction<S>,
   > = (queue.dispatch = (dispatchAction.bind(

@@ -81,22 +81,25 @@ type OpaqueRoot = FiberRoot;
 
 // 0 is PROD, 1 is DEV.
 // Might add PROFILE later.
+// 打包类型
 type BundleType = 0 | 1;
 
 type DevToolsConfig = {|
   bundleType: BundleType,
   version: string,
-  rendererPackageName: string,
+  rendererPackageName: string, // react-art|react-dom|react-native-renderer|react-test-renderer
   // Note: this actually *does* depend on Fiber internal fields.
   // Used by "inspect clicked DOM element" in React DevTools.
-  findFiberByHostInstance?: (instance: Instance | TextInstance) => Fiber,
+  findFiberByHostInstance?: (instance: Instance | TextInstance) => Fiber, // 根据页面元素获取当前元素的fiber
   // Used by RN in-app inspector.
   // This API is unfortunately RN-specific.
   // TODO: Change it to accept Fiber instead and type it properly.
   getInspectorDataForViewTag?: (tag: number) => Object,
 |};
 
+// 是否提示有嵌套更新
 let didWarnAboutNestedUpdates;
+// 保存了
 let didWarnAboutFindNodeInStrictMode;
 
 if (__DEV__) {
@@ -104,6 +107,10 @@ if (__DEV__) {
   didWarnAboutFindNodeInStrictMode = {};
 }
 
+/**
+ * 获取子树的上下文
+ * @param {React$Component} parentComponent 
+ */
 function getContextForSubtree(
   parentComponent: ?React$Component<any, any>,
 ): Object {
@@ -116,6 +123,9 @@ function getContextForSubtree(
 
   if (fiber.tag === ClassComponent) {
     const Component = fiber.type;
+    /**
+     * 如果是由provider传递下来的context
+     */
     if (isLegacyContextProvider(Component)) {
       return processChildContext(fiber, Component, parentContext);
     }
@@ -124,6 +134,13 @@ function getContextForSubtree(
   return parentContext;
 }
 
+/**
+ * 
+ * @param {Fiber} current 
+ * @param {ReactNodeList} element 
+ * @param {ExpirationTime} expirationTime 
+ * @param {Function} callback 
+ */
 function scheduleRootUpdate(
   current: Fiber,
   element: ReactNodeList,
@@ -131,6 +148,9 @@ function scheduleRootUpdate(
   suspenseConfig: null | SuspenseConfig,
   callback: ?Function,
 ) {
+  /**
+   * render方法中不允许调用update，可以在componentDidUpdate调用
+   */
   if (__DEV__) {
     if (
       ReactCurrentFiberPhase === 'render' &&
@@ -155,6 +175,9 @@ function scheduleRootUpdate(
   update.payload = {element};
 
   callback = callback === undefined ? null : callback;
+  /**
+   * render 方法的callback可选参数必须是一个函数
+   */
   if (callback !== null) {
     warningWithoutStack(
       typeof callback === 'function',

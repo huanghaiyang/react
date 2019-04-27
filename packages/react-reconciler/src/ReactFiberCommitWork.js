@@ -167,6 +167,7 @@ const callComponentWillUnmountWithTimer = function(current, instance) {
 };
 
 // Capture errors so they don't interrupt unmounting.
+// 安全的调用组件写在，主动捕获错误
 function safelyCallComponentWillUnmount(current, instance) {
   if (__DEV__) {
     invokeGuardedCallback(
@@ -189,6 +190,7 @@ function safelyCallComponentWillUnmount(current, instance) {
   }
 }
 
+// 安全的分离fiber与ref的关系
 function safelyDetachRef(current: Fiber) {
   const ref = current.ref;
   if (ref !== null) {
@@ -207,6 +209,7 @@ function safelyDetachRef(current: Fiber) {
         }
       }
     } else {
+      // ref的fiber设置为null
       ref.current = null;
     }
   }
@@ -228,6 +231,11 @@ function safelyCallDestroy(current, destroy) {
   }
 }
 
+/**
+ * 处理effects&保存state快照
+ * @param {Fiber} current 
+ * @param {Fiber} finishedWork 不如换个名称futureFinishedWork或者nextWork
+ */
 function commitBeforeMutationLifeCycles(
   current: Fiber | null,
   finishedWork: Fiber,
@@ -236,6 +244,9 @@ function commitBeforeMutationLifeCycles(
     case FunctionComponent:
     case ForwardRef:
     case SimpleMemoComponent: {
+      /**
+       * 处理effect队列，对effect进行销毁或者创建
+       */
       commitHookEffectList(UnmountSnapshot, NoHookEffect, finishedWork);
       return;
     }
@@ -244,6 +255,7 @@ function commitBeforeMutationLifeCycles(
         if (current !== null) {
           const prevProps = current.memoizedProps;
           const prevState = current.memoizedState;
+          // 更新之前保存state快照
           startPhaseTimer(finishedWork, 'getSnapshotBeforeUpdate');
           const instance = finishedWork.stateNode;
           // We could update instance props and state here,
@@ -274,6 +286,7 @@ function commitBeforeMutationLifeCycles(
               );
             }
           }
+          // props快照
           const snapshot = instance.getSnapshotBeforeUpdate(
             finishedWork.elementType === finishedWork.type
               ? prevProps
@@ -318,19 +331,40 @@ function commitBeforeMutationLifeCycles(
   }
 }
 
+/**
+ * 处理effect任务队列，队列中既有需要destroy的也有需要create的
+ * @param {number} unmountTag 
+ * @param {number} mountTag 
+ * @param {Fiber} finishedWork 
+ */
 function commitHookEffectList(
   unmountTag: number,
   mountTag: number,
   finishedWork: Fiber,
 ) {
+  /**
+   * 函数组件更新队列
+   */
   const updateQueue: FunctionComponentUpdateQueue | null = (finishedWork.updateQueue: any);
+  /**
+   * 因为是任务队列，所以肯定或有游标指向当前需要处理effect，lastEffect就是当前游标指向的effect
+   */
   let lastEffect = updateQueue !== null ? updateQueue.lastEffect : null;
   if (lastEffect !== null) {
     const firstEffect = lastEffect.next;
     let effect = firstEffect;
+    /**
+     * 把lastEffect当做firstEffect，从lastEffect开始遍历处理任务队列剩余部分
+     */
     do {
+      /**
+       * 对于已经绑定了fiber的effect
+       */
       if ((effect.tag & unmountTag) !== NoHookEffect) {
         // Unmount
+        /**
+         * 调用effect的销毁方法
+         */
         const destroy = effect.destroy;
         effect.destroy = undefined;
         if (destroy !== undefined) {
@@ -351,6 +385,9 @@ function commitHookEffectList(
                 ' You returned null. If your effect does not require clean ' +
                 'up, return undefined (or nothing).';
             } else if (typeof destroy.then === 'function') {
+              /**
+               * useEffect不能返回异步函数或者Promise，如果effect中包含异步杉树，则需要在effect内部立即执行
+               */
               addendum =
                 '\n\nIt looks like you wrote useEffect(async () => ...) or returned a Promise. ' +
                 'Instead, write the async function inside your effect ' +
@@ -792,6 +829,8 @@ function commitUnmount(current: Fiber): void {
   }
 }
 
+// 如果host node已经被移除，那么不应该调用内部节点的removeChild方法, 因为内部节点早晚会被上层调用移除掉
+// 在host node 被移除之前应该调用child nide 的componentWillUnmount方法，因此应该使用循环遍历的方式进行操作
 function commitNestedUnmounts(root: Fiber): void {
   // While we're inside a removed host node we don't want to call
   // removeChild on the inner nodes because they're removed by the top
@@ -827,6 +866,7 @@ function commitNestedUnmounts(root: Fiber): void {
   }
 }
 
+// 清除current fiber , alternate fiber 的return ,child ,memoizedState , updateQueue
 function detachFiber(current: Fiber) {
   // Cut off the return pointers to disconnect it from the tree. Ideally, we
   // should clear the child pointer of the parent alternate to let this
@@ -894,6 +934,7 @@ function commitContainer(finishedWork: Fiber) {
   }
 }
 
+// 获取当前fiber的host node
 function getHostParentFiber(fiber: Fiber): Fiber {
   let parent = fiber.return;
   while (parent !== null) {
@@ -909,6 +950,7 @@ function getHostParentFiber(fiber: Fiber): Fiber {
   );
 }
 
+// 判断fiber是否可以作为host node fiber 
 function isHostParent(fiber: Fiber): boolean {
   return (
     fiber.tag === HostComponent ||
@@ -917,6 +959,7 @@ function isHostParent(fiber: Fiber): boolean {
   );
 }
 
+// 获取当前fiber的相邻节点
 function getHostSibling(fiber: Fiber): ?Instance {
   // We're going to search forward into the tree until we find a sibling host
   // node. Unfortunately, if multiple insertions are done in a row we have to
@@ -1045,13 +1088,16 @@ function commitPlacement(finishedWork: Fiber): void {
   }
 }
 
+// 递归卸载所有子节点
 function unmountHostComponents(current): void {
   // We only have the top Fiber that was deleted but we need to recurse down its
   // children to find all the terminal nodes.
+  // 当前fiber其实已经被删除掉了，只需要递归子节点即可
   let node: Fiber = current;
 
   // Each iteration, currentParent is populated with node's host parent if not
   // currentParentIsValid.
+  // 表示当前循环内的currentParent是否有效
   let currentParentIsValid = false;
 
   // Note: these two variables *must* always be updated together.
@@ -1091,6 +1137,7 @@ function unmountHostComponents(current): void {
       // After all the children have unmounted, it is now safe to remove the
       // node from the tree.
       if (currentParentIsContainer) {
+        // 移除容器组件（HostPortal, HostRoot）内的子节点
         removeChildFromContainer(
           ((currentParent: any): Container),
           (node.stateNode: Instance | TextInstance),
@@ -1113,6 +1160,7 @@ function unmountHostComponents(current): void {
           (node.stateNode: SuspenseInstance),
         );
       } else {
+        // https://www.zhihu.com/question/268028123
         clearSuspenseBoundary(
           ((currentParent: any): Instance),
           (node.stateNode: SuspenseInstance),

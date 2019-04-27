@@ -22,12 +22,13 @@ import {unstable_getThreadID} from 'scheduler/tracing';
 
 // TODO: This should be lifted into the renderer.
 export type Batch = {
-  _defer: boolean,
-  _expirationTime: ExpirationTime,
+  _defer: boolean, // 是否是异步的
+  _expirationTime: ExpirationTime, // 过期时间
   _onComplete: () => mixed,
-  _next: Batch | null,
+  _next: Batch | null, // 下一个节点
 };
 
+// pending中的交互操作
 export type PendingInteractionMap = Map<ExpirationTime, Set<Interaction>>;
 
 type BaseFiberRootProperties = {|
@@ -35,9 +36,9 @@ type BaseFiberRootProperties = {|
   tag: RootTag,
 
   // Any additional information from the host associated with this root.
-  containerInfo: any,
+  containerInfo: any, // 相关联的容器
   // Used only by persistent updates.
-  pendingChildren: any,
+  pendingChildren: any, // 持久化更新
   // The currently active root fiber. This is the mutable root of the tree.
   current: Fiber,
 

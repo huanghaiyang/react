@@ -27,6 +27,7 @@ export function resolveDefaultProps(Component: any, baseProps: Object): Object {
   return baseProps;
 }
 
+// promise | thenable component
 export function readLazyComponentType<T>(lazyComponent: LazyComponent<T>): T {
   const status = lazyComponent._status;
   const result = lazyComponent._result;
@@ -44,8 +45,10 @@ export function readLazyComponentType<T>(lazyComponent: LazyComponent<T>): T {
       throw thenable;
     }
     default: {
+      // 设置组件状态为正在获取
       lazyComponent._status = Pending;
       const ctor = lazyComponent._ctor;
+      // 初始化一个thenable
       const thenable = ctor();
       thenable.then(
         moduleObject => {

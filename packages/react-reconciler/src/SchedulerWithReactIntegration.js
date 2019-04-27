@@ -117,6 +117,7 @@ function reactPriorityToSchedulerPriority(reactPriorityLevel) {
   }
 }
 
+// 运行一个具有优先级的函数
 export function runWithPriority<T>(
   reactPriorityLevel: ReactPriorityLevel,
   fn: () => T,
@@ -125,12 +126,14 @@ export function runWithPriority<T>(
   return Scheduler_runWithPriority(priorityLevel, fn);
 }
 
+// 调度执行callback
 export function scheduleCallback(
-  reactPriorityLevel: ReactPriorityLevel,
-  callback: SchedulerCallback,
-  options: SchedulerCallbackOptions | void | null,
+  reactPriorityLevel: ReactPriorityLevel, // 优先级
+  callback: SchedulerCallback, // 回调
+  options: SchedulerCallbackOptions | void | null, // 回调选项
 ) {
   const priorityLevel = reactPriorityToSchedulerPriority(reactPriorityLevel);
+  // 执行调度
   return Scheduler_scheduleCallback(priorityLevel, callback, options);
 }
 
@@ -185,6 +188,7 @@ function flushSyncCallbackQueueImpl() {
         syncQueue = syncQueue.slice(i + 1);
       }
       // Resume flushing in the next tick
+      // 在下一个tick继续执行剩余的回调
       Scheduler_scheduleCallback(
         Scheduler_ImmediatePriority,
         flushSyncCallbackQueue,

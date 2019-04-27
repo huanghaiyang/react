@@ -302,6 +302,7 @@ export function propagateContextChange(
   }
 }
 
+// 根据fiber读取上线文环境
 export function prepareToReadContext(
   workInProgress: Fiber,
   renderExpirationTime: ExpirationTime,

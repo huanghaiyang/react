@@ -9,6 +9,18 @@
 
 import invariant from 'shared/invariant';
 
+/**
+ * 代理执行函数并且捕获错误
+ * @param {*} name 
+ * @param {*} func 
+ * @param {*} context 
+ * @param {*} a 
+ * @param {*} b 
+ * @param {*} c 
+ * @param {*} d 
+ * @param {*} e 
+ * @param {*} f 
+ */
 let invokeGuardedCallbackImpl = function<A, B, C, D, E, F, Context>(
   name: string | null,
   func: (a: A, b: B, c: C, d: D, e: E, f: F) => mixed,
@@ -20,10 +32,19 @@ let invokeGuardedCallbackImpl = function<A, B, C, D, E, F, Context>(
   e: E,
   f: F,
 ) {
+  /**
+   * 获取函数参数数组
+   */
   const funcArgs = Array.prototype.slice.call(arguments, 3);
   try {
+    /**
+     * 执行函数
+     */
     func.apply(context, funcArgs);
   } catch (error) {
+    /**
+     * 捕获错误并且调用给你onError进行处理
+     */
     this.onError(error);
   }
 };

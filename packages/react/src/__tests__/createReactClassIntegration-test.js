@@ -29,6 +29,9 @@ describe('create-react-class-integration', () => {
     );
   });
 
+  /**
+   * createClass方法参数对象必须含有一个render方法
+   */
   it('should throw when `render` is not specified', () => {
     expect(function() {
       createReactClass({});
@@ -199,6 +202,9 @@ describe('create-react-class-integration', () => {
   });
 
   // TODO: Consider actually moving these to statics or drop this unit test.
+  /**
+   * 静态方法提示
+   */
   xit('should warn when using deprecated non-static spec keys', () => {
     expect(() =>
       createReactClass({

@@ -115,10 +115,11 @@ export type Update<State> = {
   payload: any,
   callback: (() => mixed) | null,
 
-  next: Update<State> | null,
+  next: Update<State> | null, // nextUpdate
   nextEffect: Update<State> | null,
 };
 
+// 更新队列
 export type UpdateQueue<State> = {
   baseState: State,
 
@@ -135,6 +136,7 @@ export type UpdateQueue<State> = {
   lastCapturedEffect: Update<State> | null,
 };
 
+// Update::tag
 export const UpdateState = 0;
 export const ReplaceState = 1;
 export const ForceUpdate = 2;
@@ -156,6 +158,10 @@ if (__DEV__) {
   };
 }
 
+/**
+ * 创建一个空的队列
+ * @param {State} baseState 
+ */
 export function createUpdateQueue<State>(baseState: State): UpdateQueue<State> {
   const queue: UpdateQueue<State> = {
     baseState,
@@ -210,13 +216,16 @@ export function createUpdate(
   };
 }
 
+// 将update添加到任务队列
 function appendUpdateToQueue<State>(
   queue: UpdateQueue<State>,
   update: Update<State>,
 ) {
   // Append the update to the end of the list.
+  // 如果任务队列是空的
   if (queue.lastUpdate === null) {
     // Queue is empty
+    // 首尾update设置
     queue.firstUpdate = queue.lastUpdate = update;
   } else {
     queue.lastUpdate.next = update;
@@ -224,6 +233,11 @@ function appendUpdateToQueue<State>(
   }
 }
 
+/**
+ * 
+ * @param {Fiber} fiber 
+ * @param {*} update 
+ */
 export function enqueueUpdate<State>(fiber: Fiber, update: Update<State>) {
   // Update queues are created lazily.
   const alternate = fiber.alternate;
@@ -234,6 +248,7 @@ export function enqueueUpdate<State>(fiber: Fiber, update: Update<State>) {
     queue1 = fiber.updateQueue;
     queue2 = null;
     if (queue1 === null) {
+      // 创建更新队列
       queue1 = fiber.updateQueue = createUpdateQueue(fiber.memoizedState);
     }
   } else {
@@ -249,6 +264,7 @@ export function enqueueUpdate<State>(fiber: Fiber, update: Update<State>) {
         );
       } else {
         // Only one fiber has an update queue. Clone to create a new one.
+        // 从现有的update queue 更新一个
         queue1 = fiber.updateQueue = cloneUpdateQueue(queue2);
       }
     } else {
@@ -262,6 +278,7 @@ export function enqueueUpdate<State>(fiber: Fiber, update: Update<State>) {
   }
   if (queue2 === null || queue1 === queue2) {
     // There's only a single queue.
+    // alternate 的update queue 为空，则添加update到fiber queue 中
     appendUpdateToQueue(queue1, update);
   } else {
     // There are two queues. We need to append the update to both queues,
@@ -299,6 +316,11 @@ export function enqueueUpdate<State>(fiber: Fiber, update: Update<State>) {
   }
 }
 
+/**
+ * 将captureUpdate加入到队列中
+ * @param {Fiber} workInProgress 
+ * @param {Update} update 
+ */
 export function enqueueCapturedUpdate<State>(
   workInProgress: Fiber,
   update: Update<State>,
@@ -320,6 +342,9 @@ export function enqueueCapturedUpdate<State>(
     );
   }
 
+  /**
+   * 入队
+   */
   // Append the update to the end of the list.
   if (workInProgressQueue.lastCapturedUpdate === null) {
     // This is the first render phase update
@@ -330,6 +355,11 @@ export function enqueueCapturedUpdate<State>(
   }
 }
 
+/**
+ * 将wip fiber的更新队列复制到alternate对象上
+ * @param {Fiber} workInProgress 
+ * @param {UpdateQueue} queue 
+ */
 function ensureWorkInProgressQueueIsAClone<State>(
   workInProgress: Fiber,
   queue: UpdateQueue<State>,
@@ -345,13 +375,14 @@ function ensureWorkInProgressQueueIsAClone<State>(
   return queue;
 }
 
+// 数据更新
 function getStateFromUpdate<State>(
   workInProgress: Fiber,
   queue: UpdateQueue<State>,
   update: Update<State>,
   prevState: State,
   nextProps: any,
-  instance: any,
+  instance: any, // 组件实例
 ): any {
   switch (update.tag) {
     case ReplaceState: {
@@ -368,6 +399,7 @@ function getStateFromUpdate<State>(
             payload.call(instance, prevState, nextProps);
           }
         }
+        // 计算
         const nextState = payload.call(instance, prevState, nextProps);
         if (__DEV__) {
           exitDisallowedContextReadInDEV();
@@ -384,6 +416,7 @@ function getStateFromUpdate<State>(
     // Intentional fallthrough
     case UpdateState: {
       const payload = update.payload;
+      // 局部数据变更
       let partialState;
       if (typeof payload === 'function') {
         // Updater function
@@ -410,6 +443,7 @@ function getStateFromUpdate<State>(
         return prevState;
       }
       // Merge the partial state and the previous state.
+      // 新老数据合并
       return Object.assign({}, prevState, partialState);
     }
     case ForceUpdate: {
@@ -420,6 +454,7 @@ function getStateFromUpdate<State>(
   return prevState;
 }
 
+// 处理更新队列
 export function processUpdateQueue<State>(
   workInProgress: Fiber,
   queue: UpdateQueue<State>,
@@ -429,6 +464,7 @@ export function processUpdateQueue<State>(
 ): void {
   hasForceUpdate = false;
 
+  // 获取wip fiber 更新队列
   queue = ensureWorkInProgressQueueIsAClone(workInProgress, queue);
 
   if (__DEV__) {
@@ -436,15 +472,18 @@ export function processUpdateQueue<State>(
   }
 
   // These values may change as we process the queue.
+  // 在处理任务队列的过程中，下面三个的值会不断变化
   let newBaseState = queue.baseState;
   let newFirstUpdate = null;
   let newExpirationTime = NoWork;
 
   // Iterate through the list of updates to compute the result.
+  // 迭代任务队列计算最终结果
   let update = queue.firstUpdate;
-  let resultState = newBaseState;
+  let resultState = newBaseState; // 初始值
   while (update !== null) {
     const updateExpirationTime = update.expirationTime;
+    // 如果当前更新的过期时间小于渲染的过期时间，则表示当前更新没有足够的优先级，跳过
     if (updateExpirationTime < renderExpirationTime) {
       // This update does not have sufficient priority. Skip it.
       if (newFirstUpdate === null) {
@@ -481,6 +520,7 @@ export function processUpdateQueue<State>(
         instance,
       );
       const callback = update.callback;
+      // 处理当前更新的回调操作
       if (callback !== null) {
         workInProgress.effectTag |= Callback;
         // Set this to null, in case it was mutated during an aborted render.

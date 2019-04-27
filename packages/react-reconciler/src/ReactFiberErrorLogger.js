@@ -33,6 +33,7 @@ export function logCapturedError(capturedError: CapturedError): void {
     // Browsers support silencing uncaught errors by calling
     // `preventDefault()` in window `error` handler.
     // We record this information as an expando on the error.
+    // 浏览器通过调用preventDefault支持静默捕获错误，
     if (error != null && error._suppressLogging) {
       if (errorBoundaryFound && willRetry) {
         // The error is recoverable and was silenced.

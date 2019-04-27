@@ -236,6 +236,7 @@ export function reconcileChildren(
   }
 }
 
+// 强制卸载当前fiber并重新调配
 function forceUnmountCurrentAndReconcile(
   current: Fiber,
   workInProgress: Fiber,
@@ -250,6 +251,7 @@ function forceUnmountCurrentAndReconcile(
   // To do this, we're going to go through the reconcile algorithm twice. In
   // the first pass, we schedule a deletion for all the current children by
   // passing null.
+  // 先挂载旧节点
   workInProgress.child = reconcileChildFibers(
     workInProgress,
     current.child,
@@ -260,6 +262,7 @@ function forceUnmountCurrentAndReconcile(
   // pass null in place of where we usually pass the current child set. This has
   // the effect of remounting all children regardless of whether their their
   // identity matches.
+  // 挂载新节点
   workInProgress.child = reconcileChildFibers(
     workInProgress,
     null,
@@ -268,6 +271,7 @@ function forceUnmountCurrentAndReconcile(
   );
 }
 
+// 更新前置引用
 function updateForwardRef(
   current: Fiber | null,
   workInProgress: Fiber,
@@ -363,6 +367,7 @@ function updateForwardRef(
   return workInProgress.child;
 }
 
+// 内存组件更新
 function updateMemoComponent(
   current: Fiber | null,
   workInProgress: Fiber,
@@ -386,6 +391,7 @@ function updateMemoComponent(
       // If this is a plain function component without default props,
       // and with only the default shallow comparison, we upgrade it
       // to a SimpleMemoComponent to allow fast path updates.
+      // 如果这是一个没有默认props的纯函数组件，那么只需要使用默认的浅对比即可，并且将其升级为SimpleMemoComponent以支持快速的树节点路径比较更新操作
       workInProgress.tag = SimpleMemoComponent;
       workInProgress.type = resolvedType;
       if (__DEV__) {
@@ -471,6 +477,7 @@ function updateMemoComponent(
   return newChild;
 }
 
+// 更新SimpleMemoComponent
 function updateSimpleMemoComponent(
   current: Fiber | null,
   workInProgress: Fiber,
@@ -509,6 +516,7 @@ function updateSimpleMemoComponent(
   }
   if (current !== null) {
     const prevProps = current.memoizedProps;
+    // 数据浅比较厚无变化
     if (
       shallowEqual(prevProps, nextProps) &&
       current.ref === workInProgress.ref &&
@@ -516,6 +524,7 @@ function updateSimpleMemoComponent(
       (__DEV__ ? workInProgress.type === current.type : true)
     ) {
       didReceiveUpdate = false;
+      // 如果更新时间小于预期渲染时间
       if (updateExpirationTime < renderExpirationTime) {
         return bailoutOnAlreadyFinishedWork(
           current,
@@ -1031,6 +1040,7 @@ function updateHostText(current, workInProgress) {
   return null;
 }
 
+// 挂载延迟组件
 function mountLazyComponent(
   _current,
   workInProgress,
@@ -1038,6 +1048,7 @@ function mountLazyComponent(
   updateExpirationTime,
   renderExpirationTime,
 ) {
+  // 如果当前fiber补位空，则将alternate fiber 设置为空
   if (_current !== null) {
     // An lazy component only mounts if it suspended inside a non-
     // concurrent tree, in an inconsistent state. We want to treat it like
@@ -1380,8 +1391,12 @@ function mountIndeterminateComponent(
   }
 }
 
+// dev环境验证春函数组件是否合法
+// https://zh-hans.reactjs.org/docs/legacy-context.html#how-to-use-context
+// http://huziketang.mangojuice.top/books/react/lesson29
 function validateFunctionComponentInDev(workInProgress: Fiber, Component: any) {
   if (Component) {
+    // 纯函数组件不可以设置childContextTypes
     warningWithoutStack(
       !Component.childContextTypes,
       '%s(...): childContextTypes cannot be defined on a function component.',
@@ -1400,6 +1415,8 @@ function validateFunctionComponentInDev(workInProgress: Fiber, Component: any) {
     if (debugSource) {
       warningKey = debugSource.fileName + ':' + debugSource.lineNumber;
     }
+    // 纯函数组件不可以设置ref属性，任何尝试使用ref的操作都将会失败
+    // https://zhuanlan.zhihu.com/p/37038907
     if (!didWarnAboutFunctionRefs[warningKey]) {
       didWarnAboutFunctionRefs[warningKey] = true;
       warning(
@@ -1412,6 +1429,7 @@ function validateFunctionComponentInDev(workInProgress: Fiber, Component: any) {
     }
   }
 
+  // 纯函数组件不可以设置getDerivedStateFromProps
   if (typeof Component.getDerivedStateFromProps === 'function') {
     const componentName = getComponentName(Component) || 'Unknown';
 
@@ -1425,6 +1443,7 @@ function validateFunctionComponentInDev(workInProgress: Fiber, Component: any) {
     }
   }
 
+  // 纯函数组件不可以设置contextType
   if (
     typeof Component.contextType === 'object' &&
     Component.contextType !== null
@@ -2444,10 +2463,12 @@ function updateEventTarget(current, workInProgress, renderExpirationTime) {
   return workInProgress.child;
 }
 
+// 标识wip fiber已经收到更新操作请求
 export function markWorkInProgressReceivedUpdate() {
   didReceiveUpdate = true;
 }
 
+// 标识fiber更新任务已经完成
 function bailoutOnAlreadyFinishedWork(
   current: Fiber | null,
   workInProgress: Fiber,
@@ -2467,6 +2488,7 @@ function bailoutOnAlreadyFinishedWork(
 
   // Check if the children have any pending work.
   const childExpirationTime = workInProgress.childExpirationTime;
+  // child超时时间小于实际渲染时间
   if (childExpirationTime < renderExpirationTime) {
     // The children don't have any work either. We can skip them.
     // TODO: Once we add back resuming, we should check if the children are

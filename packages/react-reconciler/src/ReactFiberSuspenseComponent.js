@@ -32,6 +32,7 @@ export function shouldCaptureSuspense(
 ): boolean {
   // If it was the primary children that just suspended, capture and render the
   // fallback. Otherwise, don't capture and bubble to the next boundary.
+  // 如果当前主要子节点已经挂起，则捕获和渲染回调
   const nextState: SuspenseState | null = workInProgress.memoizedState;
   if (nextState !== null) {
     return false;

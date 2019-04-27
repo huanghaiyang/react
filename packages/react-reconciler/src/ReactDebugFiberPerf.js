@@ -66,6 +66,9 @@ let effectCountInCurrentCommit: number = 0;
 let isWaitingForCallback: boolean = false;
 // During commits, we only show a measurement once per method name
 // to avoid stretch the commit phase with measurement overhead.
+/**
+ * 调试环境下，需要对commit进行时间打点、性能监测，根据fiber组件名称及其所在运行阶段的信息，提取一个唯一的label,维护一个set集合，可以防止对同一个fiber出现重复过度监测的问题（影响性能）
+ */
 const labelsInCurrentCommit: Set<string> = new Set();
 
 const formatMarkName = (markName: string) => {
@@ -278,6 +281,7 @@ export function startWorkTimer(fiber: Fiber): void {
   }
 }
 
+// 取消计时器计时
 export function cancelWorkTimer(fiber: Fiber): void {
   if (enableUserTimingAPI) {
     if (!supportsUserTiming || shouldIgnoreFiber(fiber)) {
@@ -399,18 +403,42 @@ export function stopWorkLoopTimer(
   }
 }
 
+/**
+ * 开启commit性能监测
+ */
 export function startCommitTimer(): void {
+  /**
+   * 判断是否可以进行计时，调试环境下可用
+   */
   if (enableUserTimingAPI) {
+    /**
+     * 是否提供了Performance API
+     */
     if (!supportsUserTiming) {
       return;
     }
+    /**
+     * 提交中的状态标识
+     */
     isCommitting = true;
+    /**
+     * 当前commit是否有update更新，这里因为是开始commit阶段，所以设置为false
+     */
     hasScheduledUpdateInCurrentCommit = false;
+    /**
+     * 如果stopCommitTimer阶段如果已经清理完毕，这里就没有必要了，不过考虑到stopCommitTimer方法运行可能没有达到预期结果，这里需要再次清理下
+     */
     labelsInCurrentCommit.clear();
+    /**
+     * 调用performance.mark方法打点
+     */
     beginMark('(Committing Changes)');
   }
 }
 
+/**
+ * 停止commit性能监测
+ */
 export function stopCommitTimer(): void {
   if (enableUserTimingAPI) {
     if (!supportsUserTiming) {
@@ -419,8 +447,14 @@ export function stopCommitTimer(): void {
 
     let warning = null;
     if (hasScheduledUpdateInCurrentCommit) {
+      /**
+       * 不允许cascade update
+       */
       warning = 'Lifecycle hook scheduled a cascading update';
     } else if (commitCountInCurrentWorkLoop > 0) {
+      /**
+       * 不允许loop update
+       */
       warning = 'Caused by a cascading update in earlier commit';
     }
     hasScheduledUpdateInCurrentCommit = false;
@@ -432,6 +466,9 @@ export function stopCommitTimer(): void {
   }
 }
 
+/**
+ * 修改host tree state之前打点
+ */
 export function startCommitSnapshotEffectsTimer(): void {
   if (enableUserTimingAPI) {
     if (!supportsUserTiming) {

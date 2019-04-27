@@ -279,8 +279,10 @@ export function requestCurrentTime() {
   return currentEventTime;
 }
 
+// 计算fiber的ExpirationTime, 时间越大优先级越高
+// https://zhuanlan.zhihu.com/p/60307571
 export function computeExpirationForFiber(
-  currentTime: ExpirationTime,
+  currentTime: ExpirationTime, // fiber当前的ExpirationTime
   fiber: Fiber,
   suspenseConfig: null | SuspenseConfig,
 ): ExpirationTime {
@@ -308,7 +310,6 @@ export function computeExpirationForFiber(
     );
   } else {
     // Compute an expiration time based on the Scheduler priority.
-    switch (priorityLevel) {
       case ImmediatePriority:
         expirationTime = Sync;
         break;
@@ -327,13 +328,6 @@ export function computeExpirationForFiber(
       default:
         invariant(false, 'Expected a valid priority level');
     }
-  }
-
-  // If we're in the middle of rendering a tree, do not update at the same
-  // expiration time that is already rendering.
-  // TODO: We shouldn't have to do this if the update is on a different root.
-  // Refactor computeExpirationForFiber + scheduleUpdate so we have access to
-  // the root when we check for this condition.
   if (workInProgressRoot !== null && expirationTime === renderExpirationTime) {
     // This is a trick to move this update into a separate batch
     expirationTime -= 1;
@@ -342,10 +336,16 @@ export function computeExpirationForFiber(
   return expirationTime;
 }
 
+// 最近一次过期时间
 let lastUniqueAsyncExpiration = NoWork;
+// 计算过期时间
 export function computeUniqueAsyncExpiration(): ExpirationTime {
+  // 当前时间
   const currentTime = requestCurrentTime();
+  // 根据当前时间计算过期时间
   let result = computeAsyncExpiration(currentTime);
+  // 如果计算结果小于最近超时时间，则表示方法computeUniqueAsyncExpiration可能在200ms内出发了很多次
+  // 则需要减小lastUniqueAsyncExpiration的值
   if (result <= lastUniqueAsyncExpiration) {
     // Since we assume the current time monotonically increases, we only hit
     // this branch when computeUniqueAsyncExpiration is fired multiple times
@@ -356,14 +356,31 @@ export function computeUniqueAsyncExpiration(): ExpirationTime {
   return result;
 }
 
+/**
+ * fiber 更新操作
+ * @param {Fiber} fiber 
+ * @param {ExpirationTime} expirationTime 
+ */
 export function scheduleUpdateOnFiber(
   fiber: Fiber,
   expirationTime: ExpirationTime,
 ) {
+  /**
+   * 检查嵌套更新是否符合规则
+   */
   checkForNestedUpdates();
+  /**
+   * 检查更新是否有效，主要是检查setState被错误调用
+   */
   warnAboutInvalidUpdatesOnClassComponentsInDEV(fiber);
 
+  /**
+   * 根据当前fiber向上遍历逐级修改expirationTime和fistPendingTime, lastPendingTime
+   */
   const root = markUpdateTimeFromFiberToRoot(fiber, expirationTime);
+  /**
+   * 如果根节点为空，表示当前fiber已经被卸载
+   */
   if (root === null) {
     warnAboutUpdateOnUnmountedFiberInDEV(fiber);
     return;
@@ -435,24 +452,36 @@ export const scheduleWork = scheduleUpdateOnFiber;
 // work without treating it as a typical update that originates from an event;
 // e.g. retrying a Suspense boundary isn't an update, but it does schedule work
 // on a fiber.
+/**
+ * 更新整个fiber tree 的expirationTime
+ * 区间开始与结束时间表示的是root节点的开始与结束时间
+ * @param {Fiber} fiber 
+ * @param {ExpirationTime} expirationTime 
+ */
 function markUpdateTimeFromFiberToRoot(fiber, expirationTime) {
   // Update the source fiber's expiration time
+  // 比较更新，优先级变的更高
   if (fiber.expirationTime < expirationTime) {
     fiber.expirationTime = expirationTime;
   }
+  // pool fiber 
   let alternate = fiber.alternate;
+  // 变更pool fiber 优先级
   if (alternate !== null && alternate.expirationTime < expirationTime) {
     alternate.expirationTime = expirationTime;
   }
   // Walk the parent path to the root and update the child expiration time.
+  // 向上查找到根节点，更新子节点的expiration time 
   let node = fiber.return;
   let root = null;
+  // 如果当前fiber的绑定的节点就是根节点，root fiber 
   if (node === null && fiber.tag === HostRoot) {
     root = fiber.stateNode;
   } else {
     while (node !== null) {
       alternate = node.alternate;
       if (node.childExpirationTime < expirationTime) {
+        // 修改子节点的expirationTime
         node.childExpirationTime = expirationTime;
         if (
           alternate !== null &&
@@ -467,20 +496,34 @@ function markUpdateTimeFromFiberToRoot(fiber, expirationTime) {
         alternate.childExpirationTime = expirationTime;
       }
       if (node.return === null && node.tag === HostRoot) {
+        /**
+         * 遍历到了根节点，不再进行遍历操作
+         */
         root = node.stateNode;
         break;
       }
+      // 将当前节点设置为父节点，逐级向上查找
       node = node.return;
     }
   }
 
+  // 如果根节点不为空
   if (root !== null) {
     // Update the first and last pending expiration times in this root
+    /**
+     * 更新第一个与最后一个的区间时间
+     */
     const firstPendingTime = root.firstPendingTime;
+    /**
+     * 如果过期时间大于区间开始时间，则将区间开始时间设置为过期时间
+     */
     if (expirationTime > firstPendingTime) {
       root.firstPendingTime = expirationTime;
     }
     const lastPendingTime = root.lastPendingTime;
+    /**
+     * 过期时间小于区间结束时间，则将区间结束时间设置为过期时间
+     */
     if (lastPendingTime === NoWork || expirationTime < lastPendingTime) {
       root.lastPendingTime = expirationTime;
     }
@@ -497,18 +540,40 @@ function markUpdateTimeFromFiberToRoot(fiber, expirationTime) {
 // should cancel the previous one. It also relies on commitRoot scheduling a
 // callback to render the next level, because that means we don't need a
 // separate callback per expiration time.
+/**
+ * 
+ * 此函数能够确保每个root fiber只会有一个回调函数被调度器调度，虽然也可以直接调用renderRoot方法，但是通过这个函数能够帮助调度器避免过多的回调发生。callback和expiration time是存储在root上的，当一个新的callback加入时，通过比较expiration time 来决定是否取消前一次将要执行的callback。因为在一个concurrent分片的截止时间前，一个callback如果提前执行完毕，那么可以利用剩余的时间，通过commitRoot 调度器继续执行下一层节点的callback
+ * 
+ * 这里expirationTime可以理解为截止时间
+ * 
+ * @param {FiberRoot} root 
+ * @param {ReactPriorityLevel} priorityLevel 
+ * @param {ExpirationTime} expirationTime 
+ */
 function scheduleCallbackForRoot(
   root: FiberRoot,
   priorityLevel: ReactPriorityLevel,
   expirationTime: ExpirationTime,
 ) {
+  /**
+   * 根节点上的回调截止时间
+   */
   const existingCallbackExpirationTime = root.callbackExpirationTime;
+  /**
+   * callback截止时间如果小于传入的截止时间，则表示有更高优先级的callback
+   */
   if (existingCallbackExpirationTime < expirationTime) {
     // New callback has higher priority than the existing one.
     const existingCallbackNode = root.callbackNode;
+    /**
+     * 取消现有的低优先的callback
+     */
     if (existingCallbackNode !== null) {
       cancelCallback(existingCallbackNode);
     }
+    /**
+     * 重新修改
+     */
     root.callbackExpirationTime = expirationTime;
 
     if (expirationTime === Sync) {
@@ -553,6 +618,12 @@ function scheduleCallbackForRoot(
   schedulePendingInteractions(root, expirationTime);
 }
 
+/**
+ * 运行回调函数
+ * @param {any} root 
+ * @param {Function} callback 
+ * @param {Boolean} isSync 
+ */
 function runRootCallback(root, callback, isSync) {
   const prevCallbackNode = root.callbackNode;
   let continuation = null;
@@ -568,13 +639,21 @@ function runRootCallback(root, callback, isSync) {
     // corresponding callback node from the root. Unless the callback node
     // has changed, which implies that it was already cancelled by a high
     // priority update.
+    /**
+     * 如果callback函数没有返回值，则把相关的callback节点从root节点中移除。如果callback节点已经发生了变化，则表示它被具有更高优先级的update取消了
+     */
     if (continuation === null && prevCallbackNode === root.callbackNode) {
       root.callbackNode = null;
-      root.callbackExpirationTime = NoWork;
+      root.callbackExpirationTime = NoWork; // 被取消
     }
   }
 }
 
+/**
+ * 手动渲染root节点，取消所有未执行的callback
+ * @param {FiberRoot} root 
+ * @param {ExpirationTime} expirationTime 
+ */
 export function flushRoot(root: FiberRoot, expirationTime: ExpirationTime) {
   if ((executionContext & (RenderContext | CommitContext)) !== NoContext) {
     invariant(
@@ -616,8 +695,20 @@ export function flushDiscreteUpdates() {
   }
 }
 
+/**
+ * 锁定根节点，如果根节点有尚未完成的更新，则返回true，表示根节点被锁定
+ * 
+ * @param {FiberRoot} root 
+ * @param {ExpirationTime} expirationTime 
+ */
 function resolveLocksOnRoot(root: FiberRoot, expirationTime: ExpirationTime) {
+  /**
+   * 第一批次更新
+   */
   const firstBatch = root.firstBatch;
+  /**
+   * 根节点上第一批次更新内容还没有处理完毕，则返回true,并且等待更新处理完毕
+   */
   if (
     firstBatch !== null &&
     firstBatch._defer &&
@@ -633,6 +724,10 @@ function resolveLocksOnRoot(root: FiberRoot, expirationTime: ExpirationTime) {
   }
 }
 
+/**
+ * 异步更新执行回调
+ * @param {Function} fn 
+ */
 export function deferredUpdates<A>(fn: () => A): A {
   // TODO: Remove in favor of Scheduler.next
   return runWithPriority(NormalPriority, fn);
@@ -647,10 +742,17 @@ export function syncUpdates<A, B, C, R>(
   return runWithPriority(ImmediatePriority, fn.bind(null, a, b, c));
 }
 
+/**
+ * 手动处理当前被挂起的非连续的事件交互部分更新
+ * 
+ */
 function flushPendingDiscreteUpdates() {
   if (rootsWithPendingDiscreteUpdates !== null) {
     // For each root with pending discrete updates, schedule a callback to
     // immediately flush them.
+    /**
+     * 每一个根节点都会有这种挂起且不连续的更新，需要通过调度器立即执行回调来处理
+     */
     const roots = rootsWithPendingDiscreteUpdates;
     rootsWithPendingDiscreteUpdates = null;
     roots.forEach((expirationTime, root) => {
@@ -661,6 +763,12 @@ function flushPendingDiscreteUpdates() {
   }
 }
 
+/**
+ * 批量更新
+ * @param {Function} fn 
+ * @param {any} R 
+ * @param {any} a 
+ */
 export function batchedUpdates<A, R>(fn: A => R, a: A): R {
   const prevExecutionContext = executionContext;
   executionContext |= BatchedContext;
@@ -759,6 +867,11 @@ export function flushControlled(fn: () => mixed): void {
   }
 }
 
+/**
+ * 重置root状态
+ * @param {FiberRoot} root 
+ * @param {ExpirationTime} expirationTime 
+ */
 function prepareFreshStack(root, expirationTime) {
   root.finishedWork = null;
   root.finishedExpirationTime = NoWork;
@@ -798,11 +911,20 @@ function prepareFreshStack(root, expirationTime) {
   }
 }
 
+/**
+ * 渲染根节点
+ * @param {FiberRoot} root 
+ * @param {ExpirationTime} expirationTime 
+ * @param {是否同步执行} isSync 
+ */
 function renderRoot(
   root: FiberRoot,
   expirationTime: ExpirationTime,
   isSync: boolean,
 ): SchedulerCallback | null {
+  /**
+   * 非render/commit阶段不应该调用renderRoot方法
+   */
   invariant(
     (executionContext & (RenderContext | CommitContext)) === NoContext,
     'Should not already be working.',
@@ -813,6 +935,9 @@ function renderRoot(
     stopRequestCallbackTimer(didExpire);
   }
 
+  /**
+   * 一个根节点上可能同时有多个callback，但是其中一个callback被及早flush掉了
+   */
   if (root.firstPendingTime < expirationTime) {
     // If there's no work left at this expiration time, exit immediately. This
     // happens when multiple callbacks are scheduled for a single root, but an
@@ -831,6 +956,9 @@ function renderRoot(
 
   // If the root or expiration time have changed, throw out the existing stack
   // and prepare a fresh one. Otherwise we'll continue where we left off.
+  /**
+   * 如果root或者expiration time 发生了变化，则抛弃已经存在的stack并且准备一个新的
+   */
   if (root !== workInProgressRoot || expirationTime !== renderExpirationTime) {
     prepareFreshStack(root, expirationTime);
     startWorkOnPendingInteractions(root, expirationTime);
@@ -1469,8 +1597,19 @@ function commitRoot(root) {
   runWithPriority(ImmediatePriority, commitRootImpl.bind(null, root));
   // If there are passive effects, schedule a callback to flush them. This goes
   // outside commitRootImpl so that it inherits the priority of the render.
+  /**
+   * 如果存在被调effects,则需要用一个callback处理它们。由于commitRootImpl没有包含这部分处理程序，因此需要用当前react运行时的优先级取处理
+   * 
+   * 意思就是commit root 阶段，受state变化影响，仍然会不断的产生被调effects，所以这里需要再处理一下
+   */
   if (rootWithPendingPassiveEffects !== null) {
+    /**
+     * 当前react优先级而不是root优先级
+     */
     const priorityLevel = getCurrentPriorityLevel();
+    /**
+     * 调度器处理被调effects
+     */
     scheduleCallback(priorityLevel, () => {
       flushPassiveEffects();
       return null;
@@ -1481,6 +1620,9 @@ function commitRoot(root) {
 
 function commitRootImpl(root) {
   flushPassiveEffects();
+  /**
+   * 调试模式下，释放并处理渲染阶段产生的warning提示
+   */
   flushRenderPhaseStrictModeWarningsInDEV();
   flushSuspensePriorityWarningInDEV();
 
@@ -1505,20 +1647,35 @@ function commitRootImpl(root) {
 
   // commitRoot never returns a continuation; it always finishes synchronously.
   // So we can clear these now to allow a new callback to be scheduled.
+  /**
+   * 因为commitRoot总是会被同步调用, 也因为方法commitRoot不会有任何返回值提供给下一步程序的运行使用，所以我们可以清除以下root节点上与当前callback有关的属性，方便调度器调度下一个callback
+   */
   root.callbackNode = null;
-  root.callbackExpirationTime = NoWork;
+  root.callbackExpirationTime = NoWork; // 重置callback expirationTime状态为NoWork
 
+  /**
+   * 开启commit性能监测
+   */
   startCommitTimer();
 
   // Update the first and last pending times on this root. The new first
   // pending time is whatever is left on the root fiber.
+  /**
+   * 更新root节点上的pending time(区间时间)
+   */
   const updateExpirationTimeBeforeCommit = finishedWork.expirationTime;
   const childExpirationTimeBeforeCommit = finishedWork.childExpirationTime;
+  /**
+   * 子节点的expirationTime如果大于根节点上的expirationTime则使用子节点的expirationTime作为根节点的firstPendingTime
+   */
   const firstPendingTimeBeforeCommit =
     childExpirationTimeBeforeCommit > updateExpirationTimeBeforeCommit
       ? childExpirationTimeBeforeCommit
       : updateExpirationTimeBeforeCommit;
   root.firstPendingTime = firstPendingTimeBeforeCommit;
+  /**
+   * root.lastPendingTime表示的是上一次commit的expirationTime，如果当前的firstPendingTime大于lastPendingTime,则表示有可能上一次渲染时，出现了节点降级，比如hidden操作会导致整个节点树不在参与渲染，也因此lastPendingTime会出现回退，比预期的值要小
+   */
   if (firstPendingTimeBeforeCommit < root.lastPendingTime) {
     // This usually means we've finished all the work, but it can also happen
     // when something gets downprioritized during render, like a hidden tree.
@@ -1527,6 +1684,9 @@ function commitRootImpl(root) {
 
   if (root === workInProgressRoot) {
     // We can reset these now that they are finished.
+    /**
+     * 符合预期行为重置状态
+     */
     workInProgressRoot = null;
     workInProgress = null;
     renderExpirationTime = NoWork;
@@ -1534,15 +1694,24 @@ function commitRootImpl(root) {
     // This indicates that the last root we worked on is not the same one that
     // we're committing now. This most commonly happens when a suspended root
     // times out.
+    /**
+     * 代码运行到这里的话就表示正在提交更新的root节点与正在处理的节点不是同一个，大多数条件下，如果root是一个异步加载的节点并且加载请求超时了，那么会出现这种情况，也就是说在一个异步组件加载阶段，调度器去调度了其他root节点并且进行了commit
+     */
   }
 
   // Get the list of effects.
+  /**
+   * 遍历处理effects列表
+   */
   let firstEffect;
   if (finishedWork.effectTag > PerformedWork) {
     // A fiber's effect list consists only of its children, not itself. So if
     // the root has an effect, we need to add it to the end of the list. The
     // resulting list is the set that would belong to the root's parent, if it
     // had one; that is, all the effects in the tree including the root.
+    /**
+     * 如果一个root节点含有effect,我们需要把它添加到队列的末尾，因为一个root节点上的effects都是子节点所有的，root本身并不包含effect（侧面说明了，函数组件是不能作为根节点的）。
+     */
     if (finishedWork.lastEffect !== null) {
       finishedWork.lastEffect.nextEffect = finishedWork;
       firstEffect = finishedWork.firstEffect;
@@ -1573,11 +1742,19 @@ function commitRootImpl(root) {
     // The first phase a "before mutation" phase. We use this phase to read the
     // state of the host tree right before we mutate it. This is where
     // getSnapshotBeforeUpdate is called.
+    /**
+     * 一个commit由多个运行阶段组成，因此也需要将effect列表拆分到每个运行阶段中，所有mutation effect 都需要在layout effect之前被调用
+     * 
+     * commit的第一个阶段是“before mutation”，在这个阶段我们会从host tree 中读取state数据并且修改它，因此getSnapshotBeforeUpdate也会在这个阶段被调用，用以保存state修改之前的快照数据
+     */
     startCommitSnapshotEffectsTimer();
     prepareForCommit(root.containerInfo);
     nextEffect = firstEffect;
     do {
       if (__DEV__) {
+        /**
+         * 代理执行commitBeforeMutationEffects并捕获错误
+         */
         invokeGuardedCallback(null, commitBeforeMutationEffects, null);
         if (hasCaughtError()) {
           invariant(nextEffect !== null, 'Should be working on an effect.');
@@ -1682,6 +1859,9 @@ function commitRootImpl(root) {
     // Measure these anyway so the flamegraph explicitly shows that there were
     // no effects.
     // TODO: Maybe there's a better way to report this.
+    /**
+     * 毫无卵用，迷惑开发者
+     */
     startCommitSnapshotEffectsTimer();
     stopCommitSnapshotEffectsTimer();
     if (enableProfilerTimer) {
@@ -1706,6 +1886,9 @@ function commitRootImpl(root) {
   }
 
   // Check if there's remaining work on this root
+  /**
+   * 如果有未完成的工作则继续处理（我不懂为什么会这样，难道是因为root节点上有其他的增量update?）
+   */
   const remainingExpirationTime = root.firstPendingTime;
   if (remainingExpirationTime !== NoWork) {
     const currentTime = requestCurrentTime();
@@ -1780,6 +1963,9 @@ function commitRootImpl(root) {
   return null;
 }
 
+/**
+ * 处理before-mutation effect
+ */
 function commitBeforeMutationEffects() {
   while (nextEffect !== null) {
     if ((nextEffect.effectTag & Snapshot) !== NoEffect) {
@@ -1787,6 +1973,9 @@ function commitBeforeMutationEffects() {
       recordEffect();
 
       const current = nextEffect.alternate;
+      /**
+       * 处理effects&保存state快照
+       */
       commitBeforeMutationEffectOnFiber(current, nextEffect);
 
       resetCurrentDebugFiberInDEV();
@@ -1795,6 +1984,9 @@ function commitBeforeMutationEffects() {
   }
 }
 
+/**
+ * 处理mutation effect
+ */
 function commitMutationEffects() {
   // TODO: Should probably move the bulk of this function to commitWork.
   while (nextEffect !== null) {
@@ -1859,6 +2051,11 @@ function commitMutationEffects() {
   }
 }
 
+/**
+ * 处理layout effect
+ * @param {FiberRoot} root 
+ * @param {ExpirationTime} committedExpirationTime 
+ */
 function commitLayoutEffects(
   root: FiberRoot,
   committedExpirationTime: ExpirationTime,
@@ -1894,7 +2091,13 @@ function commitLayoutEffects(
   }
 }
 
+/**
+ * 处理root节点上被调effects
+ */
 export function flushPassiveEffects() {
+  /**
+   * 不存在则跳过处理程序
+   */
   if (rootWithPendingPassiveEffects === null) {
     return false;
   }
@@ -1904,11 +2107,17 @@ export function flushPassiveEffects() {
   pendingPassiveEffectsExpirationTime = NoWork;
 
   let prevInteractions: Set<Interaction> | null = null;
+  /**
+   * 调试跟踪
+   */
   if (enableSchedulerTracing) {
     prevInteractions = __interactionsRef.current;
     __interactionsRef.current = root.memoizedInteractions;
   }
 
+  /**
+   * 渲染和提交阶段不能处理被调effects
+   */
   invariant(
     (executionContext & (RenderContext | CommitContext)) === NoContext,
     'Cannot flush passive effects while already rendering.',
@@ -1919,14 +2128,31 @@ export function flushPassiveEffects() {
   // Note: This currently assumes there are no passive effects on the root
   // fiber, because the root is not part of its own effect list. This could
   // change in the future.
+  /**
+   * 目前root fiber并不是被调effects的所有者，未来可能会做修改
+   */
   let effect = root.current.firstEffect;
   while (effect !== null) {
     if (__DEV__) {
       setCurrentDebugFiberInDEV(effect);
+      /**
+       * 执行effect函数并且捕获函数执行过程中的错误
+       * 
+       * commitPassiveHookEffects 代理了effects的执行
+       */
       invokeGuardedCallback(null, commitPassiveHookEffects, null, effect);
+      /**
+       * effect执行时发生了错误
+       */
       if (hasCaughtError()) {
         invariant(effect !== null, 'Should be working on an effect.');
+        /**
+         * 清除错误并返回
+         */
         const error = clearCaughtError();
+        /**
+         * 继续处理捕获的错误
+         */
         captureCommitPhaseError(effect, error);
       }
       resetCurrentDebugFiberInDEV();
@@ -1994,10 +2220,18 @@ function captureCommitPhaseErrorOnRoot(
   }
 }
 
+/**
+ * 处理commit阶段代理执行effect时捕获的错误
+ * @param {Fiber} sourceFiber 
+ * @param {mixed} error 
+ */
 export function captureCommitPhaseError(sourceFiber: Fiber, error: mixed) {
   if (sourceFiber.tag === HostRoot) {
     // Error was thrown at the root. There is no parent, so the root
     // itself should capture it.
+    /**
+     * HostRoot由于没有父节点，因此可以自行捕获处理，不需要向上冒泡
+     */
     captureCommitPhaseErrorOnRoot(sourceFiber, sourceFiber, error);
     return;
   }
@@ -2034,6 +2268,12 @@ export function captureCommitPhaseError(sourceFiber: Fiber, error: mixed) {
   }
 }
 
+/**
+ * 检查异步组件
+ * @param {FiberRoot} root 
+ * @param {Thenable} thenable 
+ * @param {ExpirationTime} suspendedTime 
+ */
 export function pingSuspendedRoot(
   root: FiberRoot,
   thenable: Thenable,
@@ -2043,9 +2283,15 @@ export function pingSuspendedRoot(
   if (pingCache !== null) {
     // The thenable resolved, so we no longer need to memoize, because it will
     // never be thrown again.
+    /**
+     * 表示已经ping过了
+     */
     pingCache.delete(thenable);
   }
 
+  /**
+   * 不是同一个root时，才需要调度器代理ping操作，这里可以直接开始ping
+   */
   if (workInProgressRoot === root && renderExpirationTime === suspendedTime) {
     // Received a ping at the same priority level at which we're currently
     // rendering. We might want to restart this render. This should mirror
@@ -2209,10 +2455,25 @@ function computeMsUntilSuspenseLoadingDelay(
   return msUntilTimeout;
 }
 
+/**
+ * 检查嵌套更新是否符合规则
+ */
 function checkForNestedUpdates() {
+  /**
+   * 判断当前递归更新个数是否超过了一次批量处理的最大值
+   */
   if (nestedUpdateCount > NESTED_UPDATE_LIMIT) {
+    /**
+     * 将递归更新个数重置为0
+     */
     nestedUpdateCount = 0;
+    /**
+     * 将更新根节点设置为null
+     */
     rootWithNestedUpdates = null;
+    /**
+     * 提示：当前最大更新已经溢出，可能是在组件的componentWillUpdate或者componentDidUpdate方法内重复调用了setState，react限制了最大嵌套更新个数防止出现无限循环
+     */
     invariant(
       false,
       'Maximum update depth exceeded. This can happen when a component ' +
@@ -2236,6 +2497,9 @@ function checkForNestedUpdates() {
   }
 }
 
+/**
+ * 调试模式下，释放并处理渲染阶段产生的warning提示
+ */
 function flushRenderPhaseStrictModeWarningsInDEV() {
   if (__DEV__) {
     ReactStrictModeWarnings.flushPendingUnsafeLifecycleWarnings();
@@ -2273,10 +2537,23 @@ function checkForInterruption(
   }
 }
 
+/**
+ * 保存了被卸载组件的更新信息（update state）
+ */
 let didWarnStateUpdateForUnmountedComponent: Set<string> | null = null;
+/**
+ * 开发环境下，提示，被卸载的组件不能够再修改state
+ * @param {Fiber} fiber 
+ */
 function warnAboutUpdateOnUnmountedFiberInDEV(fiber) {
   if (__DEV__) {
+    /**
+     * 组件类型
+     */
     const tag = fiber.tag;
+    /**
+     * 异步加载组件不予提示
+     */
     if (
       tag !== HostRoot &&
       tag !== ClassComponent &&
@@ -2290,6 +2567,9 @@ function warnAboutUpdateOnUnmountedFiberInDEV(fiber) {
     }
     // We show the whole stack but dedupe on the top component's name because
     // the problematic code almost always lies inside that component.
+    /**
+     * 这里的意思是，有些人会给组件瞎几把起名字
+     */
     const componentName = getComponentName(fiber.type) || 'ReactComponent';
     if (didWarnStateUpdateForUnmountedComponent !== null) {
       if (didWarnStateUpdateForUnmountedComponent.has(componentName)) {
@@ -2299,6 +2579,13 @@ function warnAboutUpdateOnUnmountedFiberInDEV(fiber) {
     } else {
       didWarnStateUpdateForUnmountedComponent = new Set([componentName]);
     }
+    /**
+     * 提示：不能在已经卸载的组件上进行数据更新
+     * 
+     * 对于ClassComponent组件，已经设置的异步任务和事件订阅，需要在方法componentWillUnmount中手动取消
+     * 
+     * 对于其他类型的组件，需要在useEffect清理函数中进行操作
+     */
     warningWithoutStack(
       false,
       "Can't perform a React state update on an unmounted component. This " +
@@ -2379,16 +2666,32 @@ if (__DEV__ && replayFailedUnitOfWorkWithInvokeGuardedCallback) {
   beginWork = originalBeginWork;
 }
 
+/**
+ * 标识在render函数内是否调用了setState
+ */
 let didWarnAboutUpdateInRender = false;
+/**
+ * 标识在getChildContext函数内是否调用了setState
+ */
 let didWarnAboutUpdateInGetChildContext = false;
+/**
+ * dev环境下检查ClassComponent是否包含有效的更新
+ * @param {Fiber} fiber 
+ */
 function warnAboutInvalidUpdatesOnClassComponentsInDEV(fiber) {
   if (__DEV__) {
     if (fiber.tag === ClassComponent) {
+      /**
+       * 判断fiber的当前执行阶段
+       */
       switch (ReactCurrentDebugFiberPhaseInDEV) {
         case 'getChildContext':
           if (didWarnAboutUpdateInGetChildContext) {
             return;
           }
+          /**
+           * 提示：在getChildContext方法内不可以调用setState函数
+           */
           warningWithoutStack(
             false,
             'setState(...): Cannot call setState() inside getChildContext()',
@@ -2399,6 +2702,9 @@ function warnAboutInvalidUpdatesOnClassComponentsInDEV(fiber) {
           if (didWarnAboutUpdateInRender) {
             return;
           }
+          /**
+           * 提示在渲染函数内不可以调用setState,render方法必须是一个纯函数
+           */
           warningWithoutStack(
             false,
             'Cannot update during an existing state transition (such as ' +

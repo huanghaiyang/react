@@ -112,6 +112,10 @@ export function onCommitRoot(root: FiberRoot, expirationTime: ExpirationTime) {
   }
 }
 
+/**
+ * 触发onCommitFiberUnmount
+ * @param {Fiber} fiber 
+ */
 export function onCommitUnmount(fiber: Fiber) {
   if (typeof onCommitFiberUnmount === 'function') {
     onCommitFiberUnmount(fiber);

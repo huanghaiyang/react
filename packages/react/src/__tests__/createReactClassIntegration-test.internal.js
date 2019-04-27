@@ -42,6 +42,9 @@ describe('create-react-class-integration', () => {
       ReactNative.render(<View />, 1);
     });
 
+    /**
+     * componentWillMount函数不建议使用
+     */
     it('should warn if users specify their own legacy componentWillMount', () => {
       const View = createReactClass({
         displayName: 'MyNativeComponent',
@@ -59,6 +62,9 @@ describe('create-react-class-integration', () => {
       );
     });
 
+    /**
+     * componentWillReceiveProps过期
+     */
     it('should warn if users specify their own legacy componentWillReceiveProps', () => {
       const View = createReactClass({
         displayName: 'MyNativeComponent',
